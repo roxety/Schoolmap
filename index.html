@@ -28,7 +28,7 @@ small{color:#667383;line-height:1.5;display:block;margin-top:10px}
 <strong>지도 이미지</strong>
 <input id="file" type="file" accept="image/*">
 <div class="stat">현재 위치 X: <b id="xv">75.42%</b><br>현재 위치 Y: <b id="yv">90.17%</b></div>
-<div class="stat">걸음 수: <b id="steps">0</b><br>방위각: <b id="heading">센서 대기</b></div>
+<div class="stat">걸음 수: <b id="steps">0</b><br>실제 방위각: <b id="heading">센서 대기</b><br>지도 기준 회전각: <b id="relativeHeading">-</b></div>
 <button class="primary" id="start">센서 시작</button>
 <button id="reset">위치 초기화</button>
 <small>초기 위치는 제공된 항공사진의 파란 점 부근(가로 75.42%, 세로 90.17%)으로 설정했습니다. 이미지 위쪽은 실제 남동쪽(방위각 약 135°)으로 가정합니다. 평면도 이미지로 교체하면 기준 위치와 축척을 다시 보정해야 합니다.</small>
@@ -51,8 +51,13 @@ function draw(){
  $('pin').style.top=$('arrow').style.top=py+'%';
  $('xv').textContent=px.toFixed(1)+'%';$('yv').textContent=py.toFixed(1)+'%';
  $('steps').textContent=steps;$('heading').textContent=heading===null?'센서 대기':Math.round(heading)+'°';
- const rot=heading===null?0:(heading-MAP_TOP_BEARING+360)%360;
+ // heading은 실제 나침반 방위각(북=0°, 동=90°, 남동=135°)입니다.
+ // 지도 위쪽의 실제 방위각도 남동쪽 135°이므로, 남동쪽을 볼 때 회전값은 0°입니다.
+ const rot=heading===null?0:((heading-MAP_TOP_BEARING)%360+360)%360;
+ $('relativeHeading').textContent=heading===null?'-':Math.round(rot)+'°';
  $('arrow').style.transform='translate(-50%,-88%) rotate('+rot+'deg)';
+ $('arrow').title=heading===null?'방향 센서 대기':
+   (Math.abs(rot)<12?'지도 위쪽(남동쪽) 방향': '지도 위쪽 기준 '+Math.round(rot)+'° 회전');
 }
 function move(bearing){
  const a=bearing*Math.PI/180,t=MAP_TOP_BEARING*Math.PI/180;
@@ -62,8 +67,10 @@ function move(bearing){
  x=Math.max(0,Math.min(IMG,x+dx));y=Math.max(0,Math.min(IMG,y-up));draw();
 }
 function orientation(e){
+ // iOS Safari의 webkitCompassHeading은 북쪽 0°, 시계방향 증가인 나침반 방위각.
+ // 다른 브라우저는 절대 방향 이벤트(alpha)를 제공할 때만 나침반 기준으로 사용.
  const h=typeof e.webkitCompassHeading==='number'?e.webkitCompassHeading:
-  (typeof e.alpha==='number'?(360-e.alpha+360)%360:null);
+  (e.absolute===true && typeof e.alpha==='number'?(360-e.alpha+360)%360:null);
  if(h!==null){heading=h;draw()}
 }
 function motion(e){
