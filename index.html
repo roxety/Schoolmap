@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Schoolmap · 실내 위치 추정</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:#f3f5f8;color:#17212b}
+header{padding:14px 18px;background:#fff;font-weight:800;border-bottom:1px solid #ddd}
+main{display:grid;grid-template-columns:290px 1fr;min-height:calc(100vh - 52px)}
+aside{padding:16px;background:#fff;border-right:1px solid #ddd}
+button,input{width:100%;padding:10px;margin:5px 0;border:1px solid #ccd3dc;border-radius:8px;background:#fff}
+button.primary{background:#2868ff;color:#fff;border-color:#2868ff}
+.stat{padding:9px;margin:7px 0;background:#f2f5f9;border-radius:8px;font-size:13px}
+#stage{position:relative;width:min(100%,100vh);aspect-ratio:1;margin:auto;background:#dce2e9;overflow:hidden}
+#map{width:100%;height:100%;object-fit:fill;display:block}
+#pin{position:absolute;left:75.42%;top:90.17%;width:22px;height:22px;border-radius:50%;background:#1688ff;border:4px solid white;box-shadow:0 1px 8px #1119;transform:translate(-50%,-50%)}
+#arrow{position:absolute;left:75.42%;top:90.17%;width:54px;height:76px;transform:translate(-50%,-88%);transform-origin:50% 88%;pointer-events:none;filter:drop-shadow(0 2px 3px #0008)}
+#arrow svg{width:100%;height:100%}
+#hint{position:absolute;inset:0;display:grid;place-items:center;color:#536171;text-align:center;padding:25px}
+small{color:#667383;line-height:1.5;display:block;margin-top:10px}
+@media(max-width:700px){main{grid-template-columns:1fr;grid-template-rows:auto 1fr}aside{border:0;border-bottom:1px solid #ddd}#stage{width:100%}}
+</style>
+</head>
+<body>
+<header>Schoolmap · 학교 실내 위치 추정</header>
+<main>
+<aside>
+<strong>지도 이미지</strong>
+<input id="file" type="file" accept="image/*">
+<div class="stat">현재 위치 X: <b id="xv">75.42%</b><br>현재 위치 Y: <b id="yv">90.17%</b></div>
+<div class="stat">걸음 수: <b id="steps">0</b><br>방위각: <b id="heading">센서 대기</b></div>
+<button class="primary" id="start">센서 시작</button>
+<button id="reset">위치 초기화</button>
+<small>초기 위치는 제공된 항공사진의 파란 점 부근(가로 75.42%, 세로 90.17%)으로 설정했습니다. 이미지 위쪽은 실제 남동쪽(방위각 약 135°)으로 가정합니다. 평면도 이미지로 교체하면 기준 위치와 축척을 다시 보정해야 합니다.</small>
+<small>실내 GPS는 정확도가 낮습니다. 현재 버전의 PDR은 휴대폰 가속도계와 방향 센서를 이용한 간이 추정이며, 걸음 검출 및 방향 오차가 누적될 수 있습니다.</small>
+</aside>
+<section id="stage">
+<div id="hint">왼쪽에서 학교 지도 이미지를 선택하세요.</div>
+<img id="map" alt="학교 지도" hidden>
+<div id="arrow"><svg viewBox="0 0 54 76"><path d="M27 3 49 58 27 47 5 58Z" fill="#ffcf33" stroke="#253247" stroke-width="3" stroke-linejoin="round"/><path d="M27 47V72" stroke="#253247" stroke-width="5" stroke-linecap="round"/></svg></div>
+<div id="pin"></div>
+</section>
+</main>
+<script>
+const MAP_TOP_BEARING=135, STEP_METERS=.45, METERS_PER_PIXEL=.12, IMG=1200;
+let x=905,y=1082,steps=0,heading=null,lastStep=0,baseline=0,running=false;
+const $=id=>document.getElementById(id);
+function draw(){
+ const px=x/IMG*100,py=y/IMG*100;
+ $('pin').style.left=$('arrow').style.left=px+'%';
+ $('pin').style.top=$('arrow').style.top=py+'%';
+ $('xv').textContent=px.toFixed(1)+'%';$('yv').textContent=py.toFixed(1)+'%';
+ $('steps').textContent=steps;$('heading').textContent=heading===null?'센서 대기':Math.round(heading)+'°';
+ const rot=heading===null?0:(heading-MAP_TOP_BEARING+360)%360;
+ $('arrow').style.transform='translate(-50%,-88%) rotate('+rot+'deg)';
+}
+function move(bearing){
+ const a=bearing*Math.PI/180,t=MAP_TOP_BEARING*Math.PI/180;
+ const east=Math.sin(a)*STEP_METERS,north=Math.cos(a)*STEP_METERS;
+ const dx=(east*Math.sin(t+Math.PI/2)+north*Math.cos(t+Math.PI/2))/METERS_PER_PIXEL;
+ const up=(east*Math.sin(t)+north*Math.cos(t))/METERS_PER_PIXEL;
+ x=Math.max(0,Math.min(IMG,x+dx));y=Math.max(0,Math.min(IMG,y-up));draw();
+}
+function orientation(e){
+ const h=typeof e.webkitCompassHeading==='number'?e.webkitCompassHeading:
+  (typeof e.alpha==='number'?(360-e.alpha+360)%360:null);
+ if(h!==null){heading=h;draw()}
+}
+function motion(e){
+ const a=e.accelerationIncludingGravity||e.acceleration;if(!a)return;
+ const m=Math.hypot(a.x||0,a.y||0,a.z||0),now=Date.now();
+ if(!baseline)baseline=m;
+ const delta=Math.abs(m-baseline);baseline=baseline*.88+m*.12;
+ if(delta>1.25&&now-lastStep>420){lastStep=now;steps++;if(heading!==null)move(heading);draw()}
+}
+async function start(){
+ try{
+  if(typeof DeviceMotionEvent!=='undefined'&&DeviceMotionEvent.requestPermission&&await DeviceMotionEvent.requestPermission()!=='granted')throw Error('동작 센서 권한이 필요합니다.');
+  if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission&&await DeviceOrientationEvent.requestPermission()!=='granted')throw Error('방향 센서 권한이 필요합니다.');
+  addEventListener('devicemotion',motion);addEventListener('deviceorientation',orientation,true);
+  running=true;$('start').textContent='센서 중지';
+ }catch(e){$('heading').textContent=e.message}
+}
+function stop(){removeEventListener('devicemotion',motion);removeEventListener('deviceorientation',orientation,true);running=false;$('start').textContent='센서 시작'}
+$('start').onclick=()=>running?stop():start();
+$('reset').onclick=()=>{stop();x=905;y=1082;steps=0;heading=null;baseline=0;draw()};
+$('file').onchange=e=>{const f=e.target.files[0];if(!f)return;$('map').src=URL.createObjectURL(f);$('map').hidden=false;$('hint').hidden=true};
+draw();
+</script>
+</body></html>
